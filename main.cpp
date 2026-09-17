@@ -32,9 +32,11 @@ bool isInside(double x, double y, double r)
   return dx * dx + dy * dy <= r * r;
 }
 
-void* calc(void* args)
+void* calc(void* data)
 {
-  // double r, size_t tests, size_t seed
+  auto args = *static_cast< std::tuple< double, size_t, size_t >* >(data);
+  double r = std::get< 0 >(args);
+  size_t tests = std::get< 1 >(args), seed = std::get< 2 >(args);
   std::default_random_engine engine(seed);
 
   double minVal = 0, maxVal = 2 * r;
@@ -54,11 +56,13 @@ void* calc(void* args)
 double area(double r, size_t threads, size_t tests, int& err)
 {
   std::vector< pthread_t > ths(threads);
+  std::vector< std::tuple< double, size_t, size_t > > vecOfArgs;
+  vecOfArgs.reserve(threads);
 
   for (size_t i = 0; i < threads; ++i)
   {
-    std::tuple< double, size_t, size_t > args = {r, tests, i};
-    err = pthread_create(&ths[i], nullptr, calc, &args);
+    vecOfArgs.push_back(std::make_tuple(r, tests, i));
+    err = pthread_create(&ths[i], nullptr, calc, &vecOfArgs[i]);
     if (err)
     {
       for (size_t j = 0; j < i; ++j)
@@ -72,8 +76,8 @@ double area(double r, size_t threads, size_t tests, int& err)
   size_t count = 0;
   for (size_t i = 0; i < threads; ++i)
   {
-    size_t* thResult = nullptr;
-    err = pthread_join(ths[i], reinterpret_cast< void** >(&thResult));
+    void* thResult = nullptr;
+    err = pthread_join(ths[i], &thResult);
     if (err)
     {
       for (size_t j = i + 1; j < threads; ++j)
@@ -82,7 +86,7 @@ double area(double r, size_t threads, size_t tests, int& err)
       }
       return 0;
     }
-    count += *thResult;
+    count += reinterpret_cast< size_t >(thResult);
   }
 
   return 4 * r * r * static_cast< double >(count) / static_cast< double >(threads * tests);
