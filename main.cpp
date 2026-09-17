@@ -1,21 +1,35 @@
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <pthread.h>
 #include <random>
-#include <tuple>
+#include <vector>
 
 bool isInside(double x, double y, double r);
-void* calc(void* data);
+void* threadAdapter(void* data);
+size_t calc(double r, size_t tests, size_t seed);
 double area(double r, size_t threads, size_t tests, int& err);
+
+struct args_t
+{
+  double r;
+  size_t tests, seed;
+};
+
+constexpr size_t THREADS_COUNT = 10;
 
 int main()
 {
   double r = 0.0;
   size_t tests = 0;
   std::cin >> r >> tests;
+  if (tests < THREADS_COUNT)
+  {
+    tests = THREADS_COUNT;
+  }
 
   int err = 0;
-  double res = area(r, 10, tests / 10, err);
+  double res = area(r, THREADS_COUNT, tests / THREADS_COUNT, err);
   if (err)
   {
     std::cerr << strerror(err) << '\n';
@@ -23,7 +37,7 @@ int main()
   }
 
   std::cout << "Методом Монте-Карло: " << res << '\n';
-  std::cout << "Формула: " << 3.14 * r * r << '\n';
+  std::cout << "Формула: " << std::acos(-1.0) * r * r << '\n';
 }
 
 bool isInside(double x, double y, double r)
@@ -32,11 +46,8 @@ bool isInside(double x, double y, double r)
   return dx * dx + dy * dy <= r * r;
 }
 
-void* calc(void* data)
+size_t calc(double r, size_t tests, size_t seed)
 {
-  auto args = *static_cast< std::tuple< double, size_t, size_t >* >(data);
-  double r = std::get< 0 >(args);
-  size_t tests = std::get< 1 >(args), seed = std::get< 2 >(args);
   std::default_random_engine engine(seed);
 
   double minVal = 0, maxVal = 2 * r;
@@ -50,19 +61,29 @@ void* calc(void* data)
       ++res;
     }
   }
-  return reinterpret_cast< void* >(res);
+  return res;
+}
+
+void* threadAdapter(void* data)
+{
+  auto args = *static_cast< args_t* >(data);
+  return reinterpret_cast< void* >(calc(args.r, args.tests, args.seed));
 }
 
 double area(double r, size_t threads, size_t tests, int& err)
 {
   std::vector< pthread_t > ths(threads);
-  std::vector< std::tuple< double, size_t, size_t > > vecOfArgs;
+  std::vector< args_t > vecOfArgs;
   vecOfArgs.reserve(threads);
 
   for (size_t i = 0; i < threads; ++i)
   {
-    vecOfArgs.push_back(std::make_tuple(r, tests, i));
-    err = pthread_create(&ths[i], nullptr, calc, &vecOfArgs[i]);
+    vecOfArgs.push_back({r, tests, i});
+  }
+
+  for (size_t i = 0; i < threads; ++i)
+  {
+    err = pthread_create(&ths[i], nullptr, threadAdapter, &vecOfArgs[i]);
     if (err)
     {
       for (size_t j = 0; j < i; ++j)
