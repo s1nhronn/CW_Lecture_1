@@ -1,11 +1,10 @@
 #include <cmath>
-#include <cstring>
 #include <exception>
 #include <iostream>
 #include <pthread.h>
 #include <random>
 #include <stdexcept>
-#include <string>
+#include <system_error>
 #include <vector>
 
 namespace hometask
@@ -105,7 +104,7 @@ double hometask::area(double r, size_t threads, size_t tests)
       {
         pthread_join(ths[j], nullptr);
       }
-      throw std::runtime_error("pthread_create failed: " + std::string(strerror(err)));
+      throw std::system_error(err, std::generic_category(), "pthread_create failed");
     }
   }
 
@@ -121,7 +120,7 @@ double hometask::area(double r, size_t threads, size_t tests)
 
   if (firstError)
   {
-    throw std::runtime_error("pthread_join failed: " + std::string(strerror(firstError)));
+    throw std::system_error(firstError, std::generic_category(), "pthread_join failed");
   }
 
   size_t count = 0;
