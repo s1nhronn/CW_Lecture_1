@@ -1,52 +1,56 @@
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <pthread.h>
 #include <random>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
-bool isInside(double x, double y, double r);
-void* threadAdapter(void* data);
-size_t calc(double r, size_t tests, size_t seed);
-double area(double r, size_t threads, size_t tests, int& err);
-
-struct args_t
+namespace hometask
 {
-  double r;
-  size_t tests, seed;
-};
+  bool isInside(double x, double y, double r);
+  void* threadAdapter(void* data);
+  size_t calc(double r, size_t tests, size_t seed);
+  double area(double r, size_t threads, size_t tests);
 
-constexpr size_t THREADS_COUNT = 10;
+  struct Task
+  {
+    double r;
+    size_t tests, seed;
+    size_t result = 0;
+  };
+
+  constexpr size_t THREADS_COUNT = 10;
+}
 
 int main()
 {
   double r = 0.0;
   size_t tests = 0;
   std::cin >> r >> tests;
-  if (tests < THREADS_COUNT)
-  {
-    tests = THREADS_COUNT;
-  }
 
-  int err = 0;
-  double res = area(r, THREADS_COUNT, tests / THREADS_COUNT, err);
-  if (err)
+  try
   {
-    std::cerr << strerror(err) << '\n';
-    return err;
+    double res = hometask::area(r, hometask::THREADS_COUNT, tests);
+    std::cout << "Методом Монте-Карло: " << res << '\n';
+    std::cout << "По формуле: " << std::acos(-1.0) * r * r << '\n';
   }
-
-  std::cout << "Методом Монте-Карло: " << res << '\n';
-  std::cout << "Формула: " << std::acos(-1.0) * r * r << '\n';
+  catch (const std::exception& e)
+  {
+    std::cerr << e.what() << '\n';
+    return 1;
+  }
 }
 
-bool isInside(double x, double y, double r)
+bool hometask::isInside(double x, double y, double r)
 {
   double dx = r - x, dy = r - y;
   return dx * dx + dy * dy <= r * r;
 }
 
-size_t calc(double r, size_t tests, size_t seed)
+size_t hometask::calc(double r, size_t tests, size_t seed)
 {
   std::default_random_engine engine(seed);
 
@@ -56,7 +60,9 @@ size_t calc(double r, size_t tests, size_t seed)
   size_t res = 0;
   for (size_t i = 0; i < tests; ++i)
   {
-    if (isInside(dist(engine), dist(engine), r))
+    double x = dist(engine);
+    double y = dist(engine);
+    if (isInside(x, y, r))
     {
       ++res;
     }
@@ -64,51 +70,65 @@ size_t calc(double r, size_t tests, size_t seed)
   return res;
 }
 
-void* threadAdapter(void* data)
+void* hometask::threadAdapter(void* data)
 {
-  auto args = *static_cast< args_t* >(data);
-  return reinterpret_cast< void* >(calc(args.r, args.tests, args.seed));
+  Task* task = static_cast< Task* >(data);
+  task->result = calc(task->r, task->tests, task->seed);
+  return nullptr;
 }
 
-double area(double r, size_t threads, size_t tests, int& err)
+double hometask::area(double r, size_t threads, size_t tests)
 {
+  if (!threads || !tests || r <= 0.0)
+  {
+    throw std::invalid_argument("All args must be greater than 0");
+  }
+
+  size_t base = tests / threads;
+  size_t remainder = tests % threads;
   std::vector< pthread_t > ths(threads);
-  std::vector< args_t > vecOfArgs;
-  vecOfArgs.reserve(threads);
+  std::vector< Task > vecOfTasks;
+  vecOfTasks.reserve(threads);
 
   for (size_t i = 0; i < threads; ++i)
   {
-    vecOfArgs.push_back({r, tests, i});
+    size_t currTestCount = base + ((i < remainder) ? 1 : 0);
+    vecOfTasks.push_back({r, currTestCount, i});
   }
 
   for (size_t i = 0; i < threads; ++i)
   {
-    err = pthread_create(&ths[i], nullptr, threadAdapter, &vecOfArgs[i]);
+    int err = pthread_create(&ths[i], nullptr, threadAdapter, &vecOfTasks[i]);
     if (err)
     {
       for (size_t j = 0; j < i; ++j)
       {
         pthread_join(ths[j], nullptr);
       }
-      return 0;
+      throw std::runtime_error("pthread_create failed: " + std::string(strerror(err)));
     }
+  }
+
+  int firstError = 0;
+  for (pthread_t th : ths)
+  {
+    int err = pthread_join(th, nullptr);
+    if (err && !firstError)
+    {
+      firstError = err;
+    }
+  }
+
+  if (firstError)
+  {
+    throw std::runtime_error("pthread_join failed: " + std::string(strerror(firstError)));
   }
 
   size_t count = 0;
-  for (size_t i = 0; i < threads; ++i)
+  for (const Task& task : vecOfTasks)
   {
-    void* thResult = nullptr;
-    err = pthread_join(ths[i], &thResult);
-    if (err)
-    {
-      for (size_t j = i + 1; j < threads; ++j)
-      {
-        pthread_join(ths[j], nullptr);
-      }
-      return 0;
-    }
-    count += reinterpret_cast< size_t >(thResult);
+    count += task.result;
   }
 
-  return 4 * r * r * static_cast< double >(count) / static_cast< double >(threads * tests);
+  return 4 * r * r * static_cast< double >(count) / static_cast< double >(tests);
 }
